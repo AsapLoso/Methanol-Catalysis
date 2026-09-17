@@ -1,12 +1,12 @@
 # $env:BASE_URL = "/starterkit"
 version: 1
 project:
-  title: TU Delft's JB Starterkit
-  # description:
-  keywords: [Jupyter Book, Open Science, TU Delft, Starterkit]
+  title: Dynamic Modeling & Transport Phenomena in Catalytic Fixed-Bed Reactors
+  description: Double BSc Thesis in Applied Physics & Applied Mathematics at Delft University of Technology
+  keywords: [Acetylene Semi-Hydrogenation, Heterogeneous Catalysis, Packed Bed Reactor, Transport Phenomena, Method of Lines, Urakawa Group, TU Delft]
 
-  github: https://github.com/TUD-JB-OS/starterkit # change this to your own repository
-  date: 2026-01-31
+  github: https://github.com/AsapLoso/Methanol-Catalysis
+  date: 2026-09-17
   thumbnail: style/thumbnail.jpg
   numbering: 
     title: true
@@ -53,8 +53,8 @@ site:
     favicon:      style/favicon.ico
     logo:         style/tudelft.png
     logo_dark:    style/tudelft-dark.png
-    logo_url:     https://jboss.tudelft.nl
-    hide_authors: true
+    logo_url:     https://asaploso.github.io/Methanol-Catalysis
+    hide_authors: false
     style:        style/custom.css
   
 

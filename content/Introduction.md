@@ -20,8 +20,8 @@ In an introduction. you often cite. Than can be done in various ways, either usi
 - `@doi:10.25080/hwcj9957` resulting in @doi:10.25080/hwcj9957
 
 **cite from bib-file**
-- `{cite:t}`jupyter2025`` resulting in {cite:t}`jupyter2025`
-- `{cite:p}`jupyter2025`` resulting in {cite:p}`jupyter2025`
+- `{cite:t}`borodzinskiSelectiveHydrogenationEthyne2006`` resulting in {cite:t}`borodzinskiSelectiveHydrogenationEthyne2006`
+- `{cite:p}`borodzinskiSelectiveHydrogenationEthyne2006`` resulting in {cite:p}`borodzinskiSelectiveHydrogenationEthyne2006`
 
 
 ## Background

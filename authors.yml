@@ -3,24 +3,41 @@ project:
   
   authors:
     - id: student
-      name: student without a name yet
+      name: Lucas van Dekken
       affiliations:
         - tud
 
   contributors:
-    - id: supervisor-1
-      name: prof. dr. John Doe
+    - id: supervisor-tn
+      name: Dr. Bijoy Bera
       affiliations:
-        - tud
-    - id: committee-1
-      name: Prof. Dr. C. Examiner
+        - tud-tnw
+    - id: supervisor-tw
+      name: Dr.ir. Z.J.G. (Zoë) Gromotka
       affiliations:
-        - tud
-    - id: committee-2
-      name: Dr. D. Examiner
+        - tud-diam
+    - id: daily-supervisor
+      name: Damian Vico van Berkel
       affiliations:
-        - tud
+        - tud-tnw
+    - id: examiner-tw2
+      name: Dr. N.V. (Neil) Budko
+      affiliations:
+        - tud-diam
+    - id: examiner-tn2
+      name: Dr. C.S. (Carlas) Smith
+      affiliations:
+        - tud-3me
 
   affiliations:
     - id: tud
       institution: Delft University of Technology
+    - id: tud-tnw
+      institution: Delft University of Technology
+      department: Department of Chemical Engineering (Faculty TNW)
+    - id: tud-diam
+      institution: Delft University of Technology
+      department: Delft Institute of Applied Mathematics (DIAM, Faculty EEMCS)
+    - id: tud-3me
+      institution: Delft University of Technology
+      department: Delft Center for Systems and Control (DCSC, Faculty 3mE)
