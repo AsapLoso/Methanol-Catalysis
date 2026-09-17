@@ -5,3 +5,7 @@ _build
 
 .pixi/*
 !.pixi/config.toml
+
+# Upstream Reference Documentation & Templates
+tud_jbos_manual/
+typst_template/
