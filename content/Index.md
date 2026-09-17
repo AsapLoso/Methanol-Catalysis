@@ -19,7 +19,7 @@ no-update-date: true
 
 a quick setup for your open publishing project.
 
-{button}`Use this template <https://github.com/new?template_name=starterkit&template_owner=TUD-JB-OS>`  
+{button}`Use this template, pretty please <https://github.com/new?template_name=starterkit&template_owner=TUD-JB-OS>`  
 
 Originally created by  
 *Freek Pols*
