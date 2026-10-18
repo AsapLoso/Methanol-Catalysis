@@ -6,10 +6,12 @@ project:
       children:
         - file: content/Detail1.md
         - file: content/Detail2.md
+        - file: content/Detail3.md
     - file: content/Introduction.md
     - file: content/Theory.md
     - file: content/Methods.md
     - file: content/Results.ipynb
+    - file: content/c2h2_hydrogenation_transient_model.ipynb
     - file: content/Conclusion.md
     - title: Appendix
       children:
