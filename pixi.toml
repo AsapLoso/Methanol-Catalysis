@@ -1,14 +1,39 @@
 [workspace]
-authors = ["FreekPols <c.f.j.pols@tudelft.nl>"]
+authors = ["Lucas van Dekken"]
 channels = ["conda-forge"]
 name = "starterkit"
 platforms = ["win-64","osx-64", "osx-arm64","linux-64"]
 version = "0.1.0"
 
+# The `pbr` package lives at the repo root and is imported, not installed.
+# Python puts the *script's* directory on sys.path, not the working directory,
+# so `pixi run python scripts/smoke.py` cannot see `pbr` from a bare checkout.
+# Setting PYTHONPATH here fixes it for scripts, pytest and `myst --execute`
+# alike, without introducing a build step or an editable install for a package
+# that is never distributed. Verified by `scripts/smoke.py` exiting 0.
+[activation.env]
+PYTHONPATH = "."
+
 [tasks]
 editor = "jupyter lab"
 preview = "myst start"
 pdf = "myst build --pdf"
+sanitise-bib = "python scripts/sanitise_bib.py"
+# `python -m pytest` rather than the `pytest` entry point, so the interpreter
+# is the pixi one and PYTHONPATH from [activation.env] is already applied.
+test = "python -m pytest tests -q"
+lint = "ruff check pbr tests scripts"
+format = "ruff format pbr tests scripts"
+smoke = "python scripts/smoke.py"
+# Windows PowerShell 5.1 is the only interpreter present on this machine
+# (`pwsh` / PowerShell 7 is NOT on PATH -- verified 2026-09-29), and
+# scripts/review_push.ps1 supports both. Exactly one interpreter is named on
+# purpose: a `pwsh ... || powershell ...` chain inverts fail-closed. If pwsh is
+# ever installed, the first branch returns the script's real exit code (1 =
+# BLOCKED), the `||` then fires a SECOND full run under 5.1, and the task's exit
+# code becomes the LAST command's -- so one interpreter divergence reports a
+# blocked review as green. Verified 2026-09-29.
+review = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/review_push.ps1"
 
 [dependencies]
 jupyterlab = ">=4.6.3,<5"
@@ -19,6 +44,9 @@ scipy = ">=1.18.0,<2"
 ipywidgets = ">=8.1.9,<9"
 typst = ">=0.15.1,<0.16"
 jupytext = ">=1.19.5,<2"
+pydantic = ">=2.9,<3"
+ruff = ">=0.6,<1"
+pytest = ">=8,<9"
 nodejs = "24.*"
 
 [pypi-dependencies]
