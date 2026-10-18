@@ -27,3 +27,18 @@ bib_crosscheck_report.md
 # Credentials: never commit, never stage. Belt-and-braces; there are none.
 .env
 *.env
+
+# LOCAL-ONLY working files. Never publish: agent governance, editor state,
+# machine exports, internal ops documents, and private project-management
+# spillover. See AGENTS.md R-PUBLIC.
+/AGENTS.md
+/.agents/
+/.githooks/
+/.gitattributes
+/opencode.json
+/.opencode/
+/Academics/
+.obsidian/
+/content/CONSOLIDATED_OVERNIGHT_PROMPTSET.md
+/content/SG3_Narrative.md
+/export typst-*.yml
