@@ -2,6 +2,8 @@
 
 Open [`bep_dynamic_reactor_response.ipynb`](bep_dynamic_reactor_response.ipynb) from the repository root. The notebook uses the existing `pbr` package, runs the transient integrations, embeds the resulting plots, and saves PNG copies under [`figures/`](figures/).
 
+For the V2 run receipt, a suggested plot review order, numerical findings, and scientific limits, see [`TECHNICAL_HANDOFF_V2.md`](TECHNICAL_HANDOFF_V2.md).
+
 Included figures: [inlet/outlet](figures/inlet_outlet.png), [axial profiles](figures/axial_profiles.png), [radial profiles with the surface boundary](figures/radial_profiles.png), [radial heatmaps](figures/radial_heatmaps.png), [last cycles](figures/last_cycles.png), [period-pair settling diagnostic](figures/settling_diagnostics.png), and [R/D comparison](figures/radius_diffusivity_comparison.png).
 
 ## Starten
