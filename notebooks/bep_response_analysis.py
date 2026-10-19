@@ -184,8 +184,10 @@ def plot_radial_profiles(
     axial_index: int,
     species_names: tuple[str, ...],
     snapshot_labels: tuple[str, ...],
+    *,
+    surface_snapshots: NDArray[np.float64] | None = None,
 ):
-    """Plot pellet cell-centre concentrations at selected cycle phases."""
+    """Plot radial cell values and optionally the physical no-film surface."""
     import matplotlib.pyplot as plt
 
     radius_fraction = np.asarray(radius_fraction, dtype=float)
@@ -200,6 +202,12 @@ def plot_radial_profiles(
         raise ValueError(f"particle_snapshots must have shape {expected}")
     if not 0 <= axial_index < snapshots.shape[1]:
         raise IndexError("axial_index is outside the particle state")
+    surface = None
+    if surface_snapshots is not None:
+        surface = np.asarray(surface_snapshots, dtype=float)
+        expected_surface = (len(snapshot_labels), len(species_names))
+        if surface.shape != expected_surface:
+            raise ValueError(f"surface_snapshots must have shape {expected_surface}")
 
     phase_colors = ("#334e68", "#d7782b", "#6c8f3f", "#b45578", "#7c3aed")
     figure, axes = plt.subplots(2, 2, figsize=(11.5, 6.8), constrained_layout=True)
@@ -216,10 +224,25 @@ def plot_radial_profiles(
                 linewidth=1.8,
                 label=label,
             )
-        axis.set_xlim(0.0, 1.0)
+            if surface is not None:
+                axis.scatter(
+                    [1.0],
+                    [surface[phase_index, species_index]],
+                    marker="s",
+                    s=30,
+                    color=phase_colors[phase_index % len(phase_colors)],
+                    edgecolor="white",
+                    linewidth=0.5,
+                    zorder=4,
+                )
+        axis.set_xlim(0.0, 1.04 if surface is not None else 1.0)
         axis.set_title(species)
         axis.set_ylabel("concentratie (mol m⁻³)")
-        axis.set_xlabel("genormaliseerde straal r/R (celcentra)")
+        axis.set_xlabel(
+            "r/R (celcentra; vierkant op r/R=1: cₚ(R)=Cᵦ)"
+            if surface is not None
+            else "genormaliseerde straal r/R (celcentra)"
+        )
         axis.ticklabel_format(axis="y", style="plain", useOffset=False)
         axis.grid(True, alpha=0.8)
         axis.legend(loc="best", fontsize=8)
@@ -274,6 +297,50 @@ def plot_cycle_overlay(
         axis.legend(loc="best", fontsize=8)
     figure.suptitle("Laatste volledige uitlaatperioden", fontsize=15, color="#111827")
     return figure, axes
+
+
+def plot_settling_diagnostics(
+    relative_rms_error: NDArray[np.float64],
+    species_names: tuple[str, ...],
+    relative_tolerance: float,
+):
+    """Plot phase-aligned cycle-pair errors against the heuristic threshold."""
+    import matplotlib.pyplot as plt
+
+    errors = np.asarray(relative_rms_error, dtype=float)
+    if errors.ndim != 2 or errors.shape[1] != len(species_names):
+        raise ValueError("relative_rms_error must have shape (cycle pair, species)")
+    if errors.shape[0] < 1 or not np.all(np.isfinite(errors)):
+        raise ValueError("relative_rms_error must contain finite cycle-pair values")
+    if relative_tolerance <= 0.0:
+        raise ValueError("relative_tolerance must be positive")
+
+    figure, axis = plt.subplots(figsize=(9.5, 4.8), constrained_layout=True)
+    pair_numbers = np.arange(1, errors.shape[0] + 1)
+    for species_index, species in enumerate(species_names):
+        plotted = np.maximum(errors[:, species_index], relative_tolerance * 1e-4)
+        axis.semilogy(
+            pair_numbers,
+            plotted,
+            marker="o",
+            markersize=4,
+            linewidth=1.7,
+            color=GAS_COLORS.get(species, "#334155"),
+            label=species,
+        )
+    axis.axhline(
+        relative_tolerance,
+        color="#9f1239",
+        linestyle="--",
+        linewidth=1.4,
+        label=f"heuristische grens {100 * relative_tolerance:g}%",
+    )
+    axis.set_xlabel("opeenvolgend periodepaar (eerdere → volgende)")
+    axis.set_ylabel("relatieve RMS-afwijking (–, log-schaal)")
+    axis.set_title("Periode-op-periode verschil per uitlaatgas")
+    axis.grid(True, which="both", alpha=0.55)
+    axis.legend(ncol=2, fontsize=9)
+    return figure, axis
 
 
 def plot_parameter_comparison(

@@ -77,6 +77,20 @@ def test_finite_volume_radial_operator_keeps_a_uniform_profile_constant() -> Non
     np.testing.assert_allclose(derivative, 0.0, atol=1e-12)
 
 
+def test_spherical_center_face_is_zero_flux_for_a_nonuniform_profile() -> None:
+    """With zero surface gradient, integrated radial diffusion is zero."""
+    grid = FiniteVolumeRadialGrid(r_p=75.0e-6, n_nodes=7, geometry=2)
+    concentration = np.array([[0.8, 1.1, 1.4, 1.2, 0.9, 0.7, 0.6]])
+    same_as_outer_cell = concentration[:, -1]
+
+    derivative = radial_diffusion_fv(
+        concentration, grid, d_eff=2.0e-6, porosity=0.5,
+        shell=same_as_outer_cell,
+    )
+
+    np.testing.assert_allclose(derivative @ grid.weights, 0.0, atol=1e-11)
+
+
 def test_finite_volume_sphere_converges_to_the_first_order_reaction_profile() -> None:
     """The cell-centred grid reproduces the analytic steady pellet profile."""
     errors = []
