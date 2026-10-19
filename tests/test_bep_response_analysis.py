@@ -9,6 +9,8 @@ from notebooks.bep_response_analysis import (
     analyse_settled_cycles,
     plot_parameter_comparison,
     plot_radial_heatmaps,
+    plot_radial_profiles,
+    plot_settling_diagnostics,
 )
 
 
@@ -87,6 +89,48 @@ def test_radial_heatmap_reports_bad_rank_as_value_error() -> None:
             0,
             ("H2", "C2H2", "C2H4", "C2H6"),
         )
+
+
+def test_radial_profile_can_mark_the_bulk_equal_surface_value() -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    species = ("H2", "C2H2", "C2H4", "C2H6")
+    snapshots = np.ones((2, 2, 4, 4))
+    surface = np.full((2, 4), 1.2)
+
+    figure, axes = plot_radial_profiles(
+        np.array([0.125, 0.375, 0.625, 0.875]),
+        snapshots,
+        1,
+        species,
+        ("fase 0%", "fase 50%"),
+        surface_snapshots=surface,
+    )
+
+    assert axes.flat[0].get_xlim()[1] > 1.0
+    assert "cₚ(R)=Cᵦ" in axes.flat[0].get_xlabel()
+    assert len(axes.flat[0].collections) == 2
+    import matplotlib.pyplot as plt
+
+    plt.close(figure)
+
+
+def test_settling_diagnostic_plot_shows_all_gases_and_threshold() -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    species = ("H2", "C2H2", "C2H4", "C2H6")
+    errors = np.geomspace(0.1, 0.001, 20).reshape(5, 4)
+
+    figure, axis = plot_settling_diagnostics(errors, species, 0.01)
+
+    assert axis.get_yscale() == "log"
+    assert len(axis.lines) == len(species) + 1
+    assert axis.lines[-1].get_ydata()[0] == 0.01
+    import matplotlib.pyplot as plt
+
+    plt.close(figure)
 
 
 def test_settling_rejects_nonmonotone_phase_grid() -> None:
