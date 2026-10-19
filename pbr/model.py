@@ -43,7 +43,7 @@ from pbr.closures import (
     SurfaceDynamics,
     dispersion_for,
 )
-from pbr.discretisation import RadialGrid
+from pbr.discretisation import FiniteVolumeRadialGrid
 from pbr.parameters import (
     DIFFUSION_VOLUMES,
     MASSES,
@@ -183,7 +183,7 @@ def build_model(
         carries_surface=carries_surface,
     )
 
-    grid = RadialGrid(
+    grid = FiniteVolumeRadialGrid(
         r_p=catalyst.particle_radius,
         n_nodes=n_radial if carries_radial else 1,
         geometry=solver.radial_geometry,

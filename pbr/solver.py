@@ -1,11 +1,15 @@
 """The method-of-lines right-hand side, and the integrator that runs it.
 
 Balances, following `bergerDynamicMethodsCatalytic2008` Eq. (1) and Eq. (2),
-on a void-volume basis:
+on a void-volume basis. With resolved, dynamic pore-gas states, the bulk gets
+the opposite of the finite-volume surface flux; the catalyst reaction is
+counted only inside the pellet. With a well-mixed-pellet closure, the pellet
+inventory is eliminated and the volume-averaged reaction is a direct bulk
+source:
 
     dC_b,i/dt = -(u_s/eps_b) dC_b,i/dz
                 + (D_ax/eps_b) d2C_b,i/dz2
-                + (rho_s (1-eps_b)/eps_b) <R_i>_particle
+                - ((1-eps_b)/eps_b) eps_p <L_D c_p,i>_particle
 
     dc_p,i/dt = (D_e/eps_p) (1/r^s) d/dr (r^s dc_p,i/dr) + (rho_s/eps_p) R_i
 
@@ -31,17 +35,18 @@ they differ by exactly `eps_p`.
 
 The rate law is normalised to mol/(kg_cat s), so the geometric prefactor
 carries the density: `rho_s / eps_p` converts it to mol/(m^3_pore s) inside the
-pellet, and `rho_s (1 - eps_b) / eps_b` to mol/(m^3_void s) in the bulk. The
-two are consistent by construction -- the particle equation volume-averaged
-over the pellet and multiplied by the bed solid fraction reproduces the bulk
-term exactly -- which `tests/test_solver.py::test_particle_average_reproduces_bulk_source`
-checks numerically rather than trusting.
+pellet. When there are no radial states, `rho_s (1 - eps_b) / eps_b` converts
+the volume-averaged rate to mol/(m^3_void s). With finite radial states, the
+finite-volume surface transfer couples bulk and pore gas, and the particle
+reaction is counted once. The discrete radial operator and this exchange term
+use the same face flux, so bulk-plus-pore gas inventory is conserved apart
+from inlet/outlet transport and reaction.
 
-Evaluation order is fixed and matters: bulk, shell, particle, chemistry, then
-the bulk source from the volume-averaged rate. `C_s` depends on `C_b`; the rate
-depends on `c_p`; the bulk source depends on the volume average of the rate.
-Any other order consumes a value from a previous stage, which on a stiff
-problem is the difference between a converging step and a diverging one.
+Evaluation order is fixed and matters: bulk state, shell, particle chemistry,
+radial diffusion, then the bulk source from the surface transfer. `C_s`
+depends on `C_b`; the rate depends on `c_p`; the bulk source depends on the
+radial diffusion flux. Any other order consumes a value from a previous stage,
+which on a stiff problem can destabilise the integration.
 
 **Nothing here writes to its input.** The state vector is unpacked into fresh
 arrays before any boundary condition is applied. An earlier version of this
@@ -70,11 +75,11 @@ from pbr.closures import (
     SurfaceDynamics,
 )
 from pbr.discretisation import (
-    RadialGrid,
+    FiniteVolumeRadialGrid,
     axial_advection,
     axial_dispersion,
     jacobian_sparsity,
-    radial_diffusion,
+    radial_diffusion_fv,
 )
 from pbr.parameters import R_GAS
 from pbr.species import GASES, IGAS, atom_counts
@@ -238,7 +243,7 @@ class Model:
     surface: SurfaceDynamics
     dispersion: AxialDispersion
     rate: RateLaw
-    grid: RadialGrid
+    grid: FiniteVolumeRadialGrid
     derived: Derived
     temperature: float
     diffusivities: dict[str, float]
@@ -267,7 +272,7 @@ class Model:
                 c_bulk[:, j],
                 c_inner[:, j],
                 float(self._d_eff[j]),
-                self.grid.dr,
+                self.grid.dr / 2.0,
             )
         return out
 
@@ -279,12 +284,12 @@ class Model:
         c_in = np.asarray(self.inlet(t), dtype=float)
 
         # --- particle field and the rate law ------------------------------
+        diffusion = None
         if self.layout.carries_radial:
             shell = self.shell_concentration(c_bulk, c_particle)
+            diffusion = self._radial_diffusion(c_particle, shell)
             local_p = c_particle * rt
             result = self.rate.rates(local_p, self.temperature)
-            weights = self.grid.weights
-            mean_rate = np.einsum("r,zri->zi", weights, result.gas)
         else:
             shell = c_bulk
             result = self.rate.rates(c_bulk * rt, self.temperature)
@@ -307,23 +312,28 @@ class Model:
             )
             dispersion = axial_dispersion(column, d_ax, dz)
             d_c_bulk[:, j] = advection[:, 0] + dispersion[:, 0]
-        d_c_bulk += self.derived.bulk_source_factor * mean_rate
+        if self.layout.carries_radial:
+            # The resolved pellet contains its own pore-gas inventory. Its
+            # chemical source is applied in the pellet equation below; the
+            # matching bulk term is the opposite interfacial diffusion flux.
+            mean_diffusion = np.einsum("r,zri->zi", self.grid.weights, diffusion)
+            transfer_factor = (
+                self.derived.particle_porosity
+                * (1.0 - self.derived.void_fraction)
+                / self.derived.void_fraction
+            )
+            d_c_bulk -= transfer_factor * mean_diffusion
+        else:
+            # With no separate pore-gas states, reaction is a direct bulk
+            # source on the catalyst mass per void volume basis.
+            d_c_bulk += self.derived.bulk_source_factor * mean_rate
 
         # --- particle ------------------------------------------------------
         d_c_particle = None
         if self.layout.carries_radial:
-            d_c_particle = np.empty_like(c_particle)
-            for j in range(self.layout.n_gas):
-                d_c_particle[:, :, j] = (
-                    radial_diffusion(
-                        c_particle[:, :, j],
-                        self.grid,
-                        float(self._d_eff[j]),
-                        self.derived.particle_porosity,
-                        shell=shell[:, j : j + 1],
-                    )
-                    + self.derived.particle_source_factor * result.gas[:, :, j]
-                )
+            assert diffusion is not None
+            d_c_particle = diffusion.copy()
+            d_c_particle += self.derived.particle_source_factor * result.gas
 
         # --- surface -------------------------------------------------------
         d_theta = None
@@ -339,6 +349,23 @@ class Model:
             d_theta = self.surface.derivative(theta, target)
 
         return self.layout.pack(d_c_bulk, d_c_particle, d_theta)
+
+    def _radial_diffusion(
+        self,
+        c_particle: NDArray[np.float64],
+        shell: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
+        """Apply the conservative radial operator to all gases and axial cells."""
+        out = np.empty_like(c_particle)
+        for j in range(self.layout.n_gas):
+            out[:, :, j] = radial_diffusion_fv(
+                c_particle[:, :, j],
+                self.grid,
+                float(self._d_eff[j]),
+                self.derived.particle_porosity,
+                shell[:, j],
+            )
+        return out
 
     # --- integration -------------------------------------------------------
 

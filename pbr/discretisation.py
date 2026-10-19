@@ -4,16 +4,19 @@ Three things live here, and they are here together because they constrain each
 other: the radial operator, the axial operator, and the sparsity pattern that
 tells the integrator how the two couple.
 
-The radial operator
--------------------
-Written in flux form, `(1/r^s) d/dr (r^s dc/dr)`, discretised across cell
-faces at `r_{i±1/2}`. Flux form rather than the equivalent
-`d^2c/dr^2 + (s/r) dc/dr` because flux form has one stencil instead of two,
-so the two terms cannot drift out of the discrete conservation the continuous
-operator has.
+Radial operators
+----------------
+The transient reactor model uses `FiniteVolumeRadialGrid` and
+`radial_diffusion_fv`: cell-centred unknowns, zero flux at the symmetry plane,
+and the physical pellet surface as a Dirichlet face. The operator is written
+as a face-flux divergence, so its radial-volume integral is exactly the
+surface transfer used with the opposite sign in the bulk balance. There is no
+dynamic state at the surface.
 
-The centre node is where this gets interesting. The operator is singular at
-`r = 0` and the limit has to be taken before discretising. Doing it properly:
+`RadialGrid` and `radial_diffusion` retain the node-centred stencil used by
+steady/reference operator checks. Its centre node needs a limiting argument:
+the differential operator is singular at `r = 0`, so take the limit before
+discretising. With symmetry `f'(0) = 0`:
 
     (1/r^s) d/dr (r^s f')  ->  f'' + (s/r) f'
 
@@ -36,17 +39,17 @@ which is why it is derived rather than tabulated.
 
 Axial operator
 --------------
-Backward-difference upwind by default. Central differences would be second
-order and would ring on the square-wave inlet this model is meant to handle,
-producing concentrations below zero -- and a stiff chemical source amplifies a
-negative concentration into a visible artefact immediately. Monotonicity beats
-order here. `TVD2` is available for smooth transients where the extra order is
-worth the limiter.
+The operators support first-order upwind and conservative TVD2 (Monotonized
+Central face reconstruction). The catalogued model defaults to TVD2. A
+centred derivative can ring near sharp inlet changes, producing negative
+concentrations that a stiff chemical source can amplify. The flux-form TVD2
+operator is second order in smooth regions and limits oscillations near steep
+gradients; the time integration and reaction still require positivity checks.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
@@ -152,6 +155,119 @@ class RadialGrid:
         return 2.0 * self.r_p  # unit area slab
 
 
+@dataclass(frozen=True, slots=True)
+class FiniteVolumeRadialGrid:
+    """Cell-centred radial finite-volume grid with the pellet surface as a face.
+
+    Unlike :class:`RadialGrid`, whose nodes include the centre and surface for
+    profile and steady-state studies, these unknowns represent finite-volume
+    cells.  The surface concentration is therefore a boundary value, not an
+    extra dynamic state.  ``weights`` are the exact radial cell-volume
+    fractions and ``r`` contains the cell-centre coordinates.
+    """
+
+    r_p: float
+    n_nodes: int
+    geometry: int
+    _faces: NDArray[np.float64] = field(init=False, repr=False, compare=False)
+    _centers: NDArray[np.float64] = field(init=False, repr=False, compare=False)
+    _weights: NDArray[np.float64] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.r_p <= 0.0 or self.n_nodes < 1:
+            raise ValueError("finite-volume radial grid needs R > 0 and N_r >= 1")
+        if self.geometry not in (0, 1, 2):
+            raise ValueError(
+                "radial geometry must be 0 (slab), 1 (cylinder), or 2 (sphere)"
+            )
+        faces = np.linspace(0.0, self.r_p, self.n_nodes + 1)
+        centers = (faces[:-1] + faces[1:]) / 2.0
+        weights = (
+            faces[1:] ** (self.s + 1) - faces[:-1] ** (self.s + 1)
+        ) / self.r_p ** (self.s + 1)
+        faces.setflags(write=False)
+        centers.setflags(write=False)
+        weights.setflags(write=False)
+        object.__setattr__(self, "_faces", faces)
+        object.__setattr__(self, "_centers", centers)
+        object.__setattr__(self, "_weights", weights)
+
+    @property
+    def s(self) -> int:
+        """0 slab, 1 cylinder, 2 sphere."""
+        return self.geometry
+
+    @property
+    def dr(self) -> float:
+        if self.n_nodes < 1:
+            raise ValueError("need at least one radial cell")
+        return self.r_p / self.n_nodes
+
+    @property
+    def r_half(self) -> NDArray[np.float64]:
+        """Cell faces, including the symmetry plane and pellet surface."""
+        return self._faces
+
+    @property
+    def r(self) -> NDArray[np.float64]:
+        """Cell centres, from ``dr/2`` to ``R - dr/2``."""
+        return self._centers
+
+    @property
+    def weights(self) -> NDArray[np.float64]:
+        """Exact radial volume fractions for each finite-volume cell."""
+        return self._weights
+
+    @property
+    def volume(self) -> float:
+        """Exact pellet volume [m^3] for the geometry."""
+        if self.s == 2:
+            return 4.0 / 3.0 * np.pi * self.r_p**3
+        if self.s == 1:
+            return np.pi * self.r_p**2  # unit length cylinder
+        return 2.0 * self.r_p  # unit area slab
+
+
+def radial_diffusion_fv(
+    c: NDArray[np.float64],
+    grid: FiniteVolumeRadialGrid,
+    d_eff: float,
+    porosity: float,
+    shell: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Conservative cell-centred ``(D_e/eps_p) * laplacian_r(c)``.
+
+    ``shell`` is a Dirichlet value at ``r = R``.  The same surface flux used
+    by the final pellet cell is returned by the volume integral of this
+    operator, so pairing it with the opposite bulk transfer term conserves
+    gas-phase inventory to round-off.
+    """
+    if c.shape[-1] != grid.n_nodes:
+        raise ValueError(f"expected {grid.n_nodes} radial cells, got {c.shape[-1]}")
+    if porosity <= 0.0:
+        raise ValueError("porosity must be positive")
+
+    shell = np.asarray(shell, dtype=float)
+    if shell.ndim < c.ndim - 1:
+        shell = np.expand_dims(shell, axis=-1)
+    shell = np.broadcast_to(shell, c.shape[:-1])
+
+    faces = grid.r_half
+    centers = grid.r
+    flux = np.zeros((*c.shape[:-1], grid.n_nodes + 1), dtype=float)
+    if grid.n_nodes > 1:
+        internal_gradient = np.diff(c, axis=-1) / np.diff(centers)
+        flux[..., 1:-1] = faces[1:-1] ** grid.s * internal_gradient
+    surface_distance = grid.r_p - centers[-1]
+    surface_gradient = (shell - c[..., -1]) / surface_distance
+    flux[..., -1] = grid.r_p**grid.s * surface_gradient
+
+    radial_measure = (faces[1:] ** (grid.s + 1) - faces[:-1] ** (grid.s + 1)) / (
+        grid.s + 1
+    )
+    return (d_eff / porosity) * np.diff(flux, axis=-1) / radial_measure
+
+
 def centre_operator(s: int, dr: float, diffusivity: float) -> float:
     """Coefficient of `(c_1 - c_0)` in the centre-node diffusion operator.
 
@@ -215,44 +331,50 @@ def axial_advection(
     c_inlet: NDArray[np.float64],
     scheme: str = "upwind1",
 ) -> NDArray[np.float64]:
-    """`-u_s dc/dz` on a uniform grid, cell-centred with the inlet as a ghost.
-
-    `c` is (n_z, n_species). The inlet enters as a ghost value at `z = -dz/2`,
-    which makes the first cell see exactly the same stencil as every other one
-    -- no special-casing, no off-by-one, and the Dirichlet condition satisfied
-    to second order.
-    """
+    """`-u_s dc/dz` on a uniform finite-volume grid with a fixed inlet flux."""
     n_z = c.shape[0]
-    padded = np.concatenate([c_inlet[None, :], c], axis=0)
 
     if scheme == "upwind1":
+        padded = np.concatenate([c_inlet[None, :], c], axis=0)
         derivative = (padded[1:] - padded[:-1]) / dz
     elif scheme == "tvd2":
-        derivative = _tvd2_derivative(padded, dz)
+        derivative = _tvd2_flux_derivative(c, c_inlet, dz)
     else:
         raise ValueError(f"unknown advection scheme {scheme!r}")
 
     return -u_s * derivative[:n_z]
 
 
-def _tvd2_derivative(padded: NDArray[np.float64], dz: float) -> NDArray[np.float64]:
-    """Monotonized Central (MC) limited second-order derivative, over `n_z = len(padded) - 1` cells.
+def _tvd2_flux_derivative(
+    c: NDArray[np.float64], c_inlet: NDArray[np.float64], dz: float
+) -> NDArray[np.float64]:
+    """Conservative flux difference with Monotonized Central reconstruction.
 
-    Cell `i` has a backward difference to cell `i-1` and a forward difference to cell `i+1`.
-    The MC limiter preserves second-order accuracy on smooth regions while remaining strictly
-    monotone across discontinuities.
+    Values are finite-volume cell averages. The inlet fixes the flux at the
+    left face and zero-gradient outflow uses the final cell value at the right
+    face. Reconstructing the upwind state at internal faces keeps the update
+    conservative while the MC limiter prevents step overshoot.
     """
-    backward = (padded[1:] - padded[:-1]) / dz
-    forward = np.empty_like(backward)
-    forward[:-1] = (padded[2:] - padded[1:-1]) / dz
-    forward[-1] = backward[-1]  # outflow: zero-gradient, no forward neighbour
+    backward = np.empty_like(c)
+    forward = np.empty_like(c)
+    backward[0] = (c[0] - c_inlet) / (0.5 * dz)
+    backward[1:] = np.diff(c, axis=0) / dz
+    forward[:-1] = np.diff(c, axis=0) / dz
+    forward[-1] = 0.0
 
     central = 0.5 * (backward + forward)
     two_b = 2.0 * backward
     two_f = 2.0 * forward
     cond = backward * forward > 0.0
     mag = np.minimum(np.abs(central), np.minimum(np.abs(two_b), np.abs(two_f)))
-    return np.where(cond, np.sign(central) * mag, backward)
+    slope = np.where(cond, np.sign(central) * mag, 0.0)
+
+    face_flux = np.empty((c.shape[0] + 1, c.shape[1]), dtype=float)
+    face_flux[0] = c_inlet
+    if c.shape[0] > 1:
+        face_flux[1:-1] = c[:-1] + 0.5 * dz * slope[:-1]
+    face_flux[-1] = c[-1]
+    return np.diff(face_flux, axis=0) / dz
 
 
 def axial_dispersion(
@@ -280,16 +402,18 @@ def jacobian_sparsity(
 ) -> csr_matrix:
     """Analytic sparsity pattern of `dr/dy`.
 
-    Every coupling is nearest-neighbour in `z` and in `r`, and there is no
-    coupling between different species. So the matrix is block-banded with
-    bandwidth `n_gas` in both directions.
+    TVD2 axial flux reconstruction can couple a cell to two upwind cells and
+    one downwind cell; radial transport couples neighbouring ``r`` cells. A
+    kinetic rate in one cell depends on the full gas mixture there, so the
+    local reaction block is dense across species. The resulting matrix remains
+    block-banded in ``z`` and ``r``.
 
     Supplying this is worth roughly two orders of magnitude on a resolved
     pellet. SciPy's default is a dense finite-difference Jacobian, which costs
     one full right-hand-side evaluation *per state variable* -- 1480 of them
     for a small pellet. Declaring the pattern lets it evaluate only the
-    neighbours, which for this structure is a small constant times `N_z`
-    rather than times `N_z * N_gas * N_r`.
+    local neighbours, which for this structure is a small constant times the
+    number of axial and radial cells rather than the square of the state size.
 
     The pattern is deliberately conservative: where unsure, include the entry.
     A pattern that is too sparse makes the numerical Jacobian wrong, which is a
@@ -307,19 +431,24 @@ def jacobian_sparsity(
         rows.append(row)
         cols.append(col)
 
-    # Bulk gas. Advection couples to the two neighbouring axial cells; the
-    # reaction couples the cell to every radial node in it.
+    # Bulk gas. The conservative TVD2 reconstruction at a left face depends on
+    # the upwind cell's slope, which can reach two cells upstream. Include the
+    # second upwind block even when a run selects first-order upwind; that
+    # conservative over-approximation keeps one pattern valid for both schemes.
+    # A bulk source can depend on every gas species in the same radial column.
     for z in range(n_z):
         for i in range(n_gas):
             row = z * n_gas + i
-            for zz in range(max(0, z - 1), min(n_z, z + 2)):
+            for zz in range(max(0, z - 2), min(n_z, z + 2)):
                 for j in range(n_gas):
                     _add(row, zz * n_gas + j)
             if n_radial:
                 for r in range(n_radial):
-                    _add(row, gas_size + (z * n_radial + r) * n_gas + i)
+                    for j in range(n_gas):
+                        _add(row, gas_size + (z * n_radial + r) * n_gas + j)
 
-    # Particle: radial coupling only, within a column.
+    # Particle: same-species radial diffusion plus local cross-species
+    # kinetics. The outermost cell also sees its same-species bulk shell value.
     if n_radial:
         for z in range(n_z):
             for r in range(n_radial):
@@ -327,6 +456,10 @@ def jacobian_sparsity(
                     row = gas_size + (z * n_radial + r) * n_gas + i
                     for rr in range(max(0, r - 1), min(n_radial, r + 2)):
                         _add(row, gas_size + (z * n_radial + rr) * n_gas + i)
+                    for j in range(n_gas):
+                        _add(row, gas_size + (z * n_radial + r) * n_gas + j)
+                    if r == n_radial - 1:
+                        _add(row, z * n_gas + i)
 
     # Surface coverages couple radially, to the gas in the same cell, and to
     # each other -- the rate law is a dense function of the gas concentrations.
@@ -351,8 +484,10 @@ def jacobian_sparsity(
     return csr_matrix((data, (rows, cols)), shape=(total, total))
 
 
-def radial_grid_for(radial: ExplicitDiffusion | object, r_p: float) -> RadialGrid:
-    """Build the grid for whatever radial closure was chosen."""
+def radial_grid_for(
+    radial: ExplicitDiffusion | object, r_p: float
+) -> FiniteVolumeRadialGrid:
+    """Build the cell-centred finite-volume grid for a radial closure."""
     n_nodes = radial.n_nodes
     geometry = getattr(radial, "geometry", 2)
-    return RadialGrid(r_p=r_p, n_nodes=n_nodes, geometry=geometry)
+    return FiniteVolumeRadialGrid(r_p=r_p, n_nodes=n_nodes, geometry=geometry)

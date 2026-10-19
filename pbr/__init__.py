@@ -38,7 +38,13 @@ from pbr.closures import (
     dispersion_for,
     external_specific_area,
 )
-from pbr.discretisation import RadialGrid, centre_operator, jacobian_sparsity
+from pbr.discretisation import (
+    FiniteVolumeRadialGrid,
+    RadialGrid,
+    centre_operator,
+    jacobian_sparsity,
+    radial_diffusion_fv,
+)
 from pbr.model import (
     Inputs,
     build_model,
@@ -69,6 +75,7 @@ __all__ = [
     "DanckwertsDispersion",
     "ExplicitDiffusion",
     "FilmResistance",
+    "FiniteVolumeRadialGrid",
     "Gas",
     "Geometry",
     "Inputs",
@@ -98,6 +105,7 @@ __all__ = [
     "external_specific_area",
     "jacobian_sparsity",
     "make_inlet",
+    "radial_diffusion_fv",
     "steady_state_initial_condition",
     "zero_state",
 ]
