@@ -31,15 +31,78 @@ from pbr.closures import (
     external_specific_area,
 )
 from pbr.discretisation import (
+    FiniteVolumeRadialGrid,
     RadialGrid,
     axial_advection,
     axial_dispersion,
     centre_operator,
     jacobian_sparsity,
     radial_diffusion,
+    radial_diffusion_fv,
 )
 
 # --- radial diffusion ------------------------------------------------------
+
+
+@pytest.mark.parametrize("geometry", [0, 1, 2])
+def test_finite_volume_radial_operator_closes_on_its_surface_flux(
+    geometry: int,
+) -> None:
+    """The volume-integrated diffusion is exactly the flux at the R face."""
+    grid = FiniteVolumeRadialGrid(r_p=2.0, n_nodes=7, geometry=geometry)
+    diffusivity, porosity = 3.0e-5, 0.4
+    particle = np.stack(
+        [np.linspace(0.3, 1.1, grid.n_nodes), np.linspace(2.0, 0.8, grid.n_nodes)]
+    )
+    shell = np.array([1.4, 0.2])
+    derivative = radial_diffusion_fv(particle, grid, diffusivity, porosity, shell)
+
+    average_derivative = derivative @ grid.weights
+    expected = (
+        diffusivity
+        / porosity
+        * (geometry + 1)
+        / grid.r_p
+        * (shell - particle[:, -1])
+        / (grid.dr / 2.0)
+    )
+    np.testing.assert_allclose(average_derivative, expected, rtol=2e-14, atol=1e-14)
+
+
+def test_finite_volume_radial_operator_keeps_a_uniform_profile_constant() -> None:
+    grid = FiniteVolumeRadialGrid(r_p=75.0e-6, n_nodes=9, geometry=2)
+    concentration = np.full((4, grid.n_nodes), 1.7)
+    shell = np.full(4, 1.7)
+    derivative = radial_diffusion_fv(concentration, grid, 1e-6, 0.5, shell)
+    np.testing.assert_allclose(derivative, 0.0, atol=1e-12)
+
+
+def test_finite_volume_sphere_converges_to_the_first_order_reaction_profile() -> None:
+    """The cell-centred grid reproduces the analytic steady pellet profile."""
+    errors = []
+    phi = 3.0
+    for n_cells in (10, 20, 40):
+        grid = FiniteVolumeRadialGrid(r_p=1.0, n_nodes=n_cells, geometry=2)
+        identity = np.eye(n_cells)
+        zero_shell = np.array([0.0])
+        operator = np.column_stack(
+            [
+                radial_diffusion_fv(
+                    identity[row : row + 1], grid, 1.0, 1.0, zero_shell
+                )[0]
+                for row in range(n_cells)
+            ]
+        )
+        boundary = radial_diffusion_fv(
+            np.zeros((1, n_cells)), grid, 1.0, 1.0, np.array([1.0])
+        )[0]
+        profile = np.linalg.solve(operator - phi**2 * identity, -boundary)
+        exact = spherical_steady_profile(phi, grid.r / grid.r_p)
+        errors.append(float(np.max(np.abs(profile - exact))))
+
+    ratios = [errors[i] / errors[i + 1] for i in range(len(errors) - 1)]
+    assert max(errors) < 6e-3
+    assert min(ratios) > 3.0, f"finite-volume convergence ratios {ratios}, expected ~4"
 
 
 def operator_matrix(grid: RadialGrid, d_eff: float, porosity: float) -> np.ndarray:
@@ -229,16 +292,16 @@ def test_upwind_advection_is_exact_for_a_constant() -> None:
 
 
 def test_upwind_advection_sign_and_magnitude() -> None:
-    """A decreasing profile must decrease further, at exactly the slope."""
+    """A decreasing cell-centred profile accumulates at the inlet and downstream."""
     n_z = 6
     dz = 1.0 / n_z
-    z = np.arange(n_z) * dz
+    z = (np.arange(n_z) + 0.5) * dz
     slope = -2.0
     c = (3.0 + slope * z)[:, None]
     out = axial_advection(c, u_s=0.5, dz=dz, c_inlet=np.array([3.0]))[:, 0]
     # dC/dt = -u * dC/dz, so a negative slope gives a positive accumulation.
     assert np.all(out >= 0.0)
-    assert out[0] == pytest.approx(0.0, abs=1e-14)  # inlet cell sees its own value
+    assert out[0] == pytest.approx(0.5, rel=1e-12)  # first-order boundary half-cell
     assert out[-1] == pytest.approx(-0.5 * slope, rel=1e-12)
 
 
@@ -251,10 +314,10 @@ def test_both_schemes_reproduce_a_linear_profile(scheme: str) -> None:
     """
     n_z = 20
     dz = 1.0 / n_z
-    z = np.arange(n_z) * dz
+    z = (np.arange(n_z) + 0.5) * dz
     c = (1.0 - 0.5 * z)[:, None]
     out = axial_advection(c, u_s=0.4, dz=dz, c_inlet=np.array([1.0]), scheme=scheme)
-    assert np.max(np.abs(out[1:] - 0.4 * 0.5)) < 1e-12
+    assert np.max(np.abs(out[1:-1] - 0.4 * 0.5)) < 1e-12
 
 
 def test_tvd2_is_second_order_and_upwind_is_not() -> None:
@@ -271,9 +334,8 @@ def test_tvd2_is_second_order_and_upwind_is_not() -> None:
         c = 1.0 + slope * z
         bump = 0.05 * np.exp(-((z - 0.5) ** 2) / (2 * 0.05**2))
         perturbed = (c + bump)[:, None]
-        z_ghost = -0.5 * dz
-        bump_ghost = 0.05 * np.exp(-((z_ghost - 0.5) ** 2) / (2 * 0.05**2))
-        c_inlet = np.array([1.0 + slope * z_ghost + bump_ghost])
+        bump_inlet = 0.05 * np.exp(-((0.0 - 0.5) ** 2) / (2 * 0.05**2))
+        c_inlet = np.array([1.0 + bump_inlet])
         out = axial_advection(perturbed, 0.4, dz, c_inlet, scheme=scheme)
         dbump = (
             -0.05 * (z - 0.5) / (0.05**2) * np.exp(-((z - 0.5) ** 2) / (2 * 0.05**2))
@@ -288,6 +350,21 @@ def test_tvd2_is_second_order_and_upwind_is_not() -> None:
     assert ratio2 > 2.0 * ratio1, (
         f"tvd2 should beat upwind1 by more than 2x at this resolution; "
         f"got upwind {ratio1:.2f}, tvd {ratio2:.2f}"
+    )
+
+
+@pytest.mark.parametrize("scheme", ["upwind1", "tvd2"])
+def test_advection_integrates_to_the_boundary_flux_difference(scheme: str) -> None:
+    """Both axial schemes conserve their inlet-minus-outlet flux exactly."""
+    dz = 0.1
+    velocity = 0.7
+    c = np.array([[1.0], [0.4], [0.8], [0.2]])
+    c_inlet = np.array([1.3])
+    derivative = axial_advection(c, velocity, dz, c_inlet, scheme)
+    np.testing.assert_allclose(
+        dz * derivative.sum(axis=0),
+        -velocity * (c[-1] - c_inlet),
+        atol=1e-14,
     )
 
 
@@ -403,8 +480,8 @@ def test_sparsity_shape_matches_the_state_vector() -> None:
     assert pattern.shape == (expected, expected)
 
 
-def test_sparsity_is_block_tridiagonal_in_the_axial_direction() -> None:
-    """A gas row must not depend on cells far from its own.
+def test_sparsity_covers_the_tvd2_axial_reconstruction_stencil() -> None:
+    """Gas rows include the two-upwind/one-downwind TVD2 flux stencil.
 
     If this ever fails the sparsity pattern is wrong, and a wrong pattern makes
     the numerical Jacobian wrong -- a silent error that costs time rather than
@@ -418,8 +495,12 @@ def test_sparsity_is_block_tridiagonal_in_the_axial_direction() -> None:
         non_zero = np.flatnonzero(row)
         gas_cols = non_zero[non_zero < gas_size]
         if gas_cols.size:
-            assert gas_cols.min() >= (z - 1) * n_gas
-            assert gas_cols.max() < (z + 2) * n_gas
+            assert gas_cols.min() >= max(0, z - 2) * n_gas
+            assert gas_cols.max() < min(n_z, z + 2) * n_gas
+
+    # At z=2, the left-face reconstruction uses the slope from z=1, which
+    # depends on z=0 as its second-upwind concentration.
+    assert pattern[2 * n_gas, 0] != 0
 
 
 def test_sparsity_without_optional_blocks() -> None:

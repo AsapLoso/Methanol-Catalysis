@@ -330,7 +330,10 @@ PROVENANCE = Registry(
             "bergerDynamicMethodsCatalytic2008",
             "Case 6.4",
             Source.ASSUMED,
-            note="0.50 reported for a packed alumina bed of a different study",
+            note=(
+                "0.45 is the assumed working value; 0.50 is reported for a packed "
+                "alumina bed in a different study and is contextual only"
+            ),
         ),
         # -- operating point
         "operating.temperature": Provenance(
@@ -348,7 +351,7 @@ PROVENANCE = Registry(
             Source.DERIVED,
             note=(
                 "D_e = eps_p D_m / tau with D_m from the Fuller correlation; "
-                "this reference is not yet in references.bib"
+                "pressure is converted from Pa to atm and D from cm^2/s to m^2/s"
             ),
         ),
         "transport.external_film": Provenance(

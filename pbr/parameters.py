@@ -47,11 +47,11 @@ class AdvectionScheme(StrEnum):
     """Monotone, `O(dz)`. Diffusive. The safe default."""
 
     TVD2 = "tvd2"
-    """SMCKF flux-limited, second order where the solution is smooth.
+    """Monotonized-Central flux limiter, second order where the solution is smooth.
 
-    Still monotone, so it cannot manufacture a negative concentration -- which
-    matters here because the stiff source term would amplify any overshoot
-    into visible ringing.
+    The conservative face-flux form controls spatial overshoot. Time
+    integration and nonlinear reaction terms can still produce small negative
+    values, which should be checked in every run.
     """
 
 
@@ -164,20 +164,19 @@ class OperatingPoint(BaseModel):
     def concentrations(self) -> dict[str, float]:
         """Gas-phase concentration per unit *void* volume [mol/m^3].
 
-        `y_i P / (RT)` gives mol per m^3 of the whole stream. With an inert
-        present that is not the void concentration, so the reactive species are
-        rescaled by the reacting fraction. With no inert the two coincide and
-        the division is skipped rather than left in as a no-op.
+        Each reactive species retains its whole-stream mole fraction in
+        ``C_i = y_i P / (R T)``. Inert species are omitted from the state
+        vector, but their share of total pressure and volumetric flow remains;
+        renormalising the reactive mole fractions would change the published
+        partial pressures.
 
         The inert is excluded from the output entirely: it is not on the
         hydrogenation network and carrying it would mean inventing a fourth
         rate for it.
         """
-        reacting = self.reacting_mole_fraction
         rt = R_GAS * self.temperature
-        scale = self.pressure if reacting == 0.0 else self.pressure / reacting
         return {
-            name: y * scale / rt
+            name: y * self.pressure / rt
             for name, y in self.mole_fractions.items()
             if name not in INERTS
         }
@@ -525,9 +524,10 @@ def fuller_diffusivity(
 ) -> float:
     """Gas-phase binary diffusivity [m^2/s] for a polyatomic gas pair.
 
-    Fuller-Schettler-Giddings. `vol_a`, `vol_b` are diffusion volumes, tabulated
-    in the source; pass them in rather than looking them up here, so a call
-    site states which pair it means.
+    Fuller-Schettler-Giddings. `pressure` is supplied in Pa and converted to
+    atm for the correlation; `mass_a` and `mass_b` are in g/mol, and `vol_a`,
+    `vol_b` are the tabulated dimensionless diffusion volumes. The correlation
+    returns cm^2/s, converted here to m^2/s.
 
     Used to build `D_e = eps_p D_m / tau`. That is a *derived* value with a
     correlation behind it, which is strictly better than a flat placeholder --
@@ -535,12 +535,12 @@ def fuller_diffusivity(
     particle, and `docs/worklog.md` sweeps the tortuosity that stands in for the
     pore structure.
     """
+    pressure_atm = pressure / 101325.0
     d_cm2_s = (
-        1.0e-2
-        * 1.43e-1
+        1.43e-3
         * temperature**1.75
         / (
-            pressure
+            pressure_atm
             * (2.0 / (1.0 / mass_a + 1.0 / mass_b)) ** 0.5
             * (vol_a ** (1.0 / 3.0) + vol_b ** (1.0 / 3.0)) ** 2
         )
