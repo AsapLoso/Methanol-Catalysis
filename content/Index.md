@@ -25,7 +25,7 @@ no-update-date: true
 
 {button}`GitHub Repository <https://github.com/AsapLoso/Methanol-Catalysis>`
 {button}`Explore Theory <./Theory.md>`
-{button}`Interactive Notebooks <./Results.ipynb>`
+{button}`BEP Model Notebook <./c2h2_hydrogenation_transient_model.ipynb>`
 
 ![](figures/cover.png)
 
@@ -54,7 +54,7 @@ This thesis investigates the non-linear dynamics, transport phenomena, and numer
 | [**1. Introduction**](./Introduction.md) | Industrial Context & Scope | Ethylene purification, limitations of steady-state PBRs, and dynamic excitation rationale. |
 | [**2. Theory**](./Theory.md) | Physical & Chemical Formulation | Continuum conservation PDEs, Danckwerts boundary conditions, and dimensionless scaling ($Pe, Da$). |
 | [**3. Methods**](./Methods.md) | Numerical Discretization | Method of Lines (MOL), Upwind scheme stability, and ODE system staging in Python. |
-| [**4. Results & Simulation**](./Results.ipynb) | Interactive Analysis & Verification | Executable Jupyter Notebook demonstrating transient state propagation, parameter fitting, and response curves. |
+| [**4. BEP Model Notebooks**](./c2h2_hydrogenation_transient_model.ipynb) | Three reactor-notebook snapshots | Review the [legacy inline scaffold](./c2h2_hydrogenation_transient_model.ipynb), [V1](https://github.com/AsapLoso/Methanol-Catalysis/blob/791e51c0eba11f4bd5095f48d0520c6af317f5f8/notebooks/bep_dynamic_reactor_response.ipynb), and [V2](https://github.com/AsapLoso/Methanol-Catalysis/blob/2ee0dc1a84529d6830dcc628fc771878907fb22c/notebooks/bep_dynamic_reactor_response.ipynb); V1/V2 remain on open PR branches ([#1](https://github.com/AsapLoso/Methanol-Catalysis/pull/1), [#2](https://github.com/AsapLoso/Methanol-Catalysis/pull/2)). [Results.ipynb](./Results.ipynb) is a generic interactive linear-fit placeholder, not a BEP reactor result. |
 | [**5. Conclusion**](./Conclusion.md) | Synthesis & Outlook | Key findings, model validity domain, and experimental verification roadmap in the Urakawa Lab. |
 
 ---
